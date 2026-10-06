@@ -1,0 +1,125 @@
+import streamlit as st
+from Bio.Seq import Seq
+from Bio.SeqUtils import gc_fraction
+import pandas as pd
+
+# Set up the web page configurations
+st.set_page_config(page_title="Genomic Sequence Detector", page_icon="🧬", layout="wide")
+
+st.title("🧬 Genomic Sequence Analysis & Motif Detector")
+st.markdown("Upload or paste a DNA/RNA sequence to inspect its properties and scan for target sub-sequences or mutation motifs.")
+
+# Sidebar for Input Methods
+st.sidebar.header("Input Sequence")
+input_method = st.sidebar.radio("Choose Input Method:", ("Paste Text", "Upload FASTA File"))
+
+sequence_str = ""
+
+if input_method == "Paste Text":
+    raw_input = st.sidebar.text_area(
+        "Paste Raw Sequence (A, T, C, G / U):", 
+        value="ATGCGATCGATCGATCGATCGATCGATCAGGTTTTAAAAGGCCT"
+    )
+    # Clean the input from spaces and newlines
+    sequence_str = "".join(raw_input.split()).upper()
+
+else:
+    uploaded_file = st.sidebar.file_uploader("Choose a FASTA file", type=["fasta", "fa", "txt"])
+    if uploaded_file is not None:
+        file_contents = uploaded_file.read().decode("utf-8")
+        # Simple FASTA parsing to strip headers
+        lines = file_contents.splitlines()
+        sequence_str = "".join([line.strip() for line in lines if not line.startswith(">")]).upper()
+
+# Core Execution Logic
+if sequence_str:
+    # 1. Structural Checks
+    is_rna = "U" in sequence_str
+    if is_rna and "T" in sequence_str:
+        st.warning("⚠️ Mixed Sequence: Found both Thymine (T) and Uracil (U). Treating as unstandardized sequence.")
+    
+    # Instantiate Biopython Sequence object
+    my_seq = Seq(sequence_str)
+    
+    # Layout splits: Summary Metrics vs Sequence Operations
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("📊 Sequence Composition")
+        
+        # Calculate key metrics
+        seq_len = len(my_seq)
+        gc_content = gc_fraction(my_seq) * 100
+        
+        st.metric(label="Sequence Length", value=f"{seq_len} bp")
+        st.metric(label="GC Content", value=f"{gc_content:.2f}%")
+        
+        # Nucleotide Counts
+        counts = {
+            "Adenine (A)": my_seq.count("A"),
+            "Thymine (T)": my_seq.count("T"),
+            "Cytosine (C)": my_seq.count("C"),
+            "Guanine (G)": my_seq.count("G"),
+        }
+        if is_rna or my_seq.count("U") > 0:
+            counts["Uracil (U)"] = my_seq.count("U")
+            
+        df_counts = pd.DataFrame(list(counts.items()), columns=["Nucleotide", "Count"])
+        st.dataframe(df_counts, use_container_width=True)
+        
+    with col2:
+        st.subheader("🔍 Sequence Detection & Operations")
+        
+        # Action Tabs
+        tab1, tab2, tab3 = st.tabs(["Motif Detection", "Transcription & Translation", "Raw Data View"])
+        
+        with tab1:
+            st.markdown("#### Scan for Target Sub-sequences / Motifs")
+            target_motif = st.text_input("Enter Target Sequence to Detect:", value="GATC").upper().strip()
+            
+            if target_motif:
+                # Find all occurrences of the motif
+                positions = []
+                start = 0
+                while True:
+                    pos = sequence_str.find(target_motif, start)
+                    if pos == -1:
+                        break
+                    positions.append(pos + 1)  # 1-indexed for human readability
+                    start = pos + 1
+                
+                if positions:
+                    st.success(f"✔️ Found **{len(positions)}** match(es) for motif **{target_motif}**!")
+                    st.write(f"**Detected at 1-indexed positions:** {positions}")
+                    
+                    # Highlight matches visually in a small container
+                    highlighted = sequence_str.replace(target_motif, f"<mark style='background-color: #ff4b4b; color: white;'>{target_motif}</mark>")
+                    st.markdown(f"**Visual Mapping:**<br><div style='word-break: break-all; font-family: monospace; background-color: #f0f2f6; padding: 10px; border-radius: 5px;'>{highlighted}</div>", unsafe_allow_html=True)
+                else:
+                    st.info(f"❌ Motif **{target_motif}** not detected in the sequence.")
+        
+        with tab2:
+            st.markdown("#### Transcription & Protein Translation Pipeline")
+            if is_rna:
+                st.write("**Sequence Type:** RNA")
+                # Back transcribe if user wants DNA
+                st.text_area("Reverse-Transcribed DNA:", value=str(my_seq.back_transcribe()), height=70)
+            else:
+                st.write("**Sequence Type:** DNA")
+                st.text_area("Transcribed RNA (T ➡️ U):", value=str(my_seq.transcribe()), height=70)
+            
+            # Protein Translation
+            try:
+                # Translate sequence up to the first stop codon or completely
+                protein = my_seq.translate(to_stop=False)
+                st.text_area("Translated Amino Acid (Protein Chain):", value=str(protein), height=100)
+            except Exception as e:
+                st.error(f"Could not translate sequence: {e}. Ensure the sequence length is an exact multiple of 3 or handles standard codon bounds.")
+
+        with tab3:
+            st.markdown("#### Full Sequence String")
+            st.text_area("Complete clean FASTA sequence format:", value=sequence_str, height=200, disabled=True)
+
+else:
+    st.info("Please enter or upload a valid genomic sequence from the sidebar to begin analysis.")
+Use code with caution.
